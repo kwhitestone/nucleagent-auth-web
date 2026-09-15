@@ -21,8 +21,8 @@ export async function register(payload: RegisterRequest): Promise<void> {
  * GET /user-info
  * Requires Authorization: Bearer <token>.
  */
-export async function fetchUserInfo(): Promise<UserInfo> {
-  const response = await http.get<UserInfo>(`${BASE}/user-info`);
+export async function fetchUserInfo(signal?: AbortSignal): Promise<UserInfo> {
+  const response = await http.get<UserInfo>(`${BASE}/user-info`, { signal });
   return response.data;
 }
 
@@ -32,8 +32,9 @@ export async function fetchUserInfo(): Promise<UserInfo> {
  */
 export async function createApiKey(
   payload: CreateApiKeyRequest,
+  signal?: AbortSignal,
 ): Promise<ApiKeyWithSecret> {
-  const response = await http.post<ApiKeyWithSecret>(`${BASE}/api-keys`, payload);
+  const response = await http.post<ApiKeyWithSecret>(`${BASE}/api-keys`, payload, { signal });
   return response.data;
 }
 
@@ -41,8 +42,8 @@ export async function createApiKey(
  * GET /api-keys
  * Requires Authorization.
  */
-export async function listApiKeys(): Promise<ApiKey[]> {
-  const response = await http.get<ApiKey[]>(`${BASE}/api-keys`);
+export async function listApiKeys(signal?: AbortSignal): Promise<ApiKey[]> {
+  const response = await http.get<ApiKey[]>(`${BASE}/api-keys`, { signal });
   return response.data;
 }
 
@@ -50,6 +51,6 @@ export async function listApiKeys(): Promise<ApiKey[]> {
  * DELETE /api-keys/:id
  * Requires Authorization.
  */
-export async function deleteApiKey(id: number | string): Promise<void> {
-  await http.delete(`${BASE}/api-keys/${id}`);
+export async function deleteApiKey(id: number | string, signal?: AbortSignal): Promise<void> {
+  await http.delete(`${BASE}/api-keys/${id}`, { signal });
 }

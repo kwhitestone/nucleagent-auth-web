@@ -15,6 +15,7 @@ import {
 import { normalizeNumericIds, toggleNumericSelection } from "@/addons/access-control/composables/authorizationPolicy";
 import { accessCatalogKey, accessErrorKey } from "@/addons/access-control/composables/accessI18n";
 import { toast } from "@/composables/useToast";
+import { useSessionRequests } from "@/composables/useSessionRequests";
 
 const props = defineProps<{ canWrite: boolean }>();
 const { t, te } = useI18n();
@@ -38,7 +39,20 @@ const errorMessage = ref("");
 const roleDialogOpen = ref(false);
 const editingRole = ref<Role | null>(null);
 const roleForm = ref<RoleForm>({ code: "", name: "", description: "", isEnabled: true });
-let permissionRequestVersion = 0;
+const run = useSessionRequests(() => {
+  roles.value = [];
+  permissions.value = [];
+  selectedRoleId.value = null;
+  selectedPermissionIds.value = [];
+  loading.value = false;
+  permissionLoading.value = false;
+  permissionError.value = "";
+  saving.value = false;
+  errorMessage.value = "";
+  roleDialogOpen.value = false;
+  editingRole.value = null;
+  roleForm.value = { code: "", name: "", description: "", isEnabled: true };
+});
 
 const selectedRole = computed(
   () => roles.value.find((role) => role.roleId === selectedRoleId.value) ?? null,
@@ -73,41 +87,37 @@ function localizedModuleName(moduleName: string): string {
 }
 
 async function loadRolePermissions(roleId: number): Promise<void> {
-  const currentVersion = ++permissionRequestVersion;
-  permissionLoading.value = true;
-  permissionError.value = "";
-  try {
-    const assigned = await listRolePermissions(roleId);
-    if (currentVersion === permissionRequestVersion && selectedRoleId.value === roleId) {
-      selectedPermissionIds.value = normalizeNumericIds(assigned.map((permission) => permission.id));
-    }
-  } catch (error) {
-    if (currentVersion === permissionRequestVersion && selectedRoleId.value === roleId) {
-      permissionError.value = accessErrorKey(error, "access.roles.permissionLoadFailedFallback");
-      toast.error(t(permissionError.value));
-    }
-  } finally {
-    if (currentVersion === permissionRequestVersion && selectedRoleId.value === roleId) permissionLoading.value = false;
-  }
+  await run("permissions", (signal) => listRolePermissions(roleId, signal), {
+    start: () => { permissionLoading.value = true; permissionError.value = ""; },
+    success: (assigned) => {
+      if (selectedRoleId.value === roleId) {
+        selectedPermissionIds.value = normalizeNumericIds(assigned.map((permission) => permission.id));
+      }
+    },
+    error: (error) => {
+      if (selectedRoleId.value === roleId) {
+        permissionError.value = accessErrorKey(error, "access.roles.permissionLoadFailedFallback");
+        toast.error(t(permissionError.value));
+      }
+    },
+    finish: () => { permissionLoading.value = false; },
+  });
 }
 
 async function load(): Promise<void> {
-  loading.value = true;
-  errorMessage.value = "";
-  try {
-    const [roleList, permissionList] = await Promise.all([listRoles(), listPermissions()]);
-    roles.value = [...roleList];
-    permissions.value = [...permissionList];
-    const nextRoleId = roleList.some((role) => role.roleId === selectedRoleId.value)
-      ? selectedRoleId.value
-      : roleList[0]?.roleId ?? null;
-    selectedRoleId.value = nextRoleId;
-    if (nextRoleId !== null) await loadRolePermissions(nextRoleId);
-  } catch (error) {
-    errorMessage.value = accessErrorKey(error, "access.roles.loadFailedFallback");
-  } finally {
-    loading.value = false;
-  }
+  await run("load", (signal) => Promise.all([listRoles(signal), listPermissions(signal)]), {
+    start: () => { loading.value = true; errorMessage.value = ""; },
+    success: async ([roleList, permissionList]) => {
+      roles.value = [...roleList];
+      permissions.value = [...permissionList];
+      const nextRoleId = roleList.some((role) => role.roleId === selectedRoleId.value)
+        ? selectedRoleId.value : roleList[0]?.roleId ?? null;
+      selectedRoleId.value = nextRoleId;
+      if (nextRoleId !== null) await loadRolePermissions(nextRoleId);
+    },
+    error: (error) => { errorMessage.value = accessErrorKey(error, "access.roles.loadFailedFallback"); },
+    finish: () => { loading.value = false; },
+  });
 }
 
 function selectRole(roleId: number): void {
@@ -141,16 +151,14 @@ function isGroupSelected(items: Permission[]): boolean {
 }
 
 async function savePermissions(): Promise<void> {
-  if (selectedRoleId.value === null || permissionsLocked.value || permissionError.value || !props.canWrite) return;
-  saving.value = true;
-  try {
-    await setRolePermissions(selectedRoleId.value, selectedPermissionIds.value);
-    toast.success(t("access.roles.success.permissionsSaved"));
-  } catch (error) {
-    toast.error(t(accessErrorKey(error, "access.roles.errors.permissionSaveFailed")));
-  } finally {
-    saving.value = false;
-  }
+  if (selectedRoleId.value === null || permissionsLocked.value || permissionError.value || !props.canWrite || saving.value) return;
+  const id = selectedRoleId.value;
+  await run("save", (signal) => setRolePermissions(id, selectedPermissionIds.value, signal), {
+    start: () => { saving.value = true; },
+    success: () => toast.success(t("access.roles.success.permissionsSaved")),
+    error: (error) => toast.error(t(accessErrorKey(error, "access.roles.errors.permissionSaveFailed"))),
+    finish: () => { saving.value = false; },
+  });
 }
 
 function openCreateRole(): void {
@@ -173,7 +181,7 @@ function openEditRole(role: Role): void {
 }
 
 async function saveRole(): Promise<void> {
-  if (!props.canWrite) return;
+  if (!props.canWrite || saving.value) return;
   const payload = {
     code: roleForm.value.code.trim(),
     name: roleForm.value.name.trim(),
@@ -188,37 +196,35 @@ async function saveRole(): Promise<void> {
     toast.warning(t("access.roles.validation.nameRequired"));
     return;
   }
-  saving.value = true;
-  try {
-    if (editingRole.value) {
-      await updateRole(editingRole.value.roleId, {
+  const editing = editingRole.value;
+  await run("save", (signal) => editing
+    ? updateRole(editing.roleId, {
         name: payload.name,
         description: payload.description,
         isEnabled: payload.isEnabled,
-      });
-    } else {
-      await createRole({ code: payload.code, name: payload.name, description: payload.description });
-    }
-    roleDialogOpen.value = false;
-    toast.success(t(editingRole.value ? "access.roles.success.updated" : "access.roles.success.created"));
-    await load();
-  } catch (error) {
-    toast.error(t(accessErrorKey(error, "access.roles.errors.roleSaveFailed")));
-  } finally {
-    saving.value = false;
-  }
+      }, signal)
+    : createRole({ code: payload.code, name: payload.name, description: payload.description }, signal), {
+    start: () => { saving.value = true; },
+    success: async () => {
+      roleDialogOpen.value = false;
+      toast.success(t(editing ? "access.roles.success.updated" : "access.roles.success.created"));
+      await load();
+    },
+    error: (error) => toast.error(t(accessErrorKey(error, "access.roles.errors.roleSaveFailed"))),
+    finish: () => { saving.value = false; },
+  });
 }
 
 async function removeRole(role: Role): Promise<void> {
   if (!props.canWrite || role.isSystem || !window.confirm(t("access.roles.dialog.deleteConfirm", { name: localizedRoleName(role) }))) return;
-  try {
-    await deleteRole(role.roleId);
-    toast.success(t("access.roles.success.deleted"));
-    if (selectedRoleId.value === role.roleId) selectedRoleId.value = null;
-    await load();
-  } catch (error) {
-    toast.error(t(accessErrorKey(error, "access.roles.errors.deleteFailed")));
-  }
+  await run(`delete-${role.roleId}`, (signal) => deleteRole(role.roleId, signal), {
+    success: async () => {
+      toast.success(t("access.roles.success.deleted"));
+      if (selectedRoleId.value === role.roleId) selectedRoleId.value = null;
+      await load();
+    },
+    error: (error) => toast.error(t(accessErrorKey(error, "access.roles.errors.deleteFailed"))),
+  });
 }
 
 onMounted(() => void load());

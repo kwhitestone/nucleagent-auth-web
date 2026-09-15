@@ -2,7 +2,7 @@
  * 子应用 ↔ 主壳 的 postMessage 通道桥接（iframe 方案，auth/executor 简化版）。
  *
  * 仅同步登录态：iframe 跨域 localStorage 不共享，壳登录后把 token 推过来，
- * 写入本子应用域的 localStorage，否则接口 401。
+ * 仅在已验证通道收到 auth 后使用内存会话。
  *
  * 仅在被 iframe 嵌入时（window.parent !== window）生效。
  */
@@ -13,7 +13,7 @@ import {
   resolveShellViewPath,
   shouldAcceptShellSessionVersion,
 } from "./shellMessagePolicy";
-import { emitSessionChange } from "./sessionEvents";
+import { resetSession } from "@/utils/token";
 import type { Router } from "vue-router";
 import { setLocale } from "@/i18n";
 import { AUTHORIZATION_CHANGED_EVENT } from "./authorizationEvents";
@@ -22,7 +22,6 @@ import { setAuthRequiredNotifier } from "./authRequiredNotifier";
 const SHELL_ORIGIN = new URL(
   import.meta.env.VITE_SHELL_URL ?? "http://localhost:26600",
 ).origin;
-let currentSessionVersion = 0;
 let activeChannel: ReturnType<typeof createRemoteChildChannel> | undefined;
 
 export function isInShell(): boolean {
@@ -32,6 +31,8 @@ export function isInShell(): boolean {
 export function installShellBridge(router: Router): () => void {
   if (!isInShell()) return () => undefined;
   const userStore = useUserStore();
+  let currentSessionVersion = 0;
+  resetSession();
 
   const channel = createRemoteChildChannel({
     appId: "auth",
@@ -40,6 +41,10 @@ export function installShellBridge(router: Router): () => void {
     messages: {
       toChild: ["auth", "view", "locale"],
       fromChild: ["auth-required", "login-request", "logout-request", "authorization-changed"],
+    },
+    onConnected() {
+      currentSessionVersion = 0;
+      resetSession();
     },
     onMessage(type, payload) {
       handleVerifiedMessage(type, payload);
@@ -72,16 +77,8 @@ export function installShellBridge(router: Router): () => void {
     )) return;
     if (d.token !== null && d.token !== undefined &&
         (typeof d.token !== "string" || d.token.length === 0 || d.token.length > 8192)) return;
-    const VKEY = "nucleagent_session_version";
-    const previousToken = userStore.token;
     currentSessionVersion = d.sessionVersion as number;
-    localStorage.setItem(VKEY, String(d.sessionVersion));
-    if (d.token) {
-      userStore.acceptShellToken(d.token);
-    } else {
-      userStore.logout();
-    }
-    if (previousToken !== (d.token ?? "")) emitSessionChange(Boolean(d.token));
+    userStore.acceptShellToken(d.token ?? "", currentSessionVersion);
   }
 
   function notifyAuthorizationChanged(): void {
@@ -101,7 +98,10 @@ export function installShellBridge(router: Router): () => void {
     window.removeEventListener(AUTHORIZATION_CHANGED_EVENT, notifyAuthorizationChanged);
     setAuthRequiredNotifier(undefined);
     channel.dispose();
-    if (activeChannel === channel) activeChannel = undefined;
+    if (activeChannel === channel) {
+      activeChannel = undefined;
+      resetSession();
+    }
   };
 }
 

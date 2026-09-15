@@ -14,8 +14,8 @@ export interface AuthContext {
   readonly displayName: string;
   readonly roles: string[];
   readonly can: (permission: string) => boolean;
-  readonly acceptShellToken: (accessToken: string) => void;
-  readonly fetchUser: () => Promise<AuthUserInfo>;
+  readonly acceptShellToken: (accessToken: string, version: number) => void;
+  readonly fetchUser: (signal?: AbortSignal) => Promise<AuthUserInfo>;
   readonly logout: () => void;
 }
 

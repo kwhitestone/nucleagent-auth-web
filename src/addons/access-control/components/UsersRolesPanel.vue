@@ -11,6 +11,7 @@ import {
 import { toggleNumericSelection } from "@/addons/access-control/composables/authorizationPolicy";
 import { accessCatalogKey, accessErrorKey } from "@/addons/access-control/composables/accessI18n";
 import { toast } from "@/composables/useToast";
+import { useSessionRequests } from "@/composables/useSessionRequests";
 
 const props = defineProps<{ canWrite: boolean }>();
 const { t, te } = useI18n();
@@ -27,7 +28,18 @@ const saving = ref(false);
 const errorMessage = ref("");
 const editingUser = ref<RbacUser | null>(null);
 const selectedRoleIds = ref<number[]>([]);
-let loadVersion = 0;
+const run = useSessionRequests(() => {
+  users.value = [];
+  roles.value = [];
+  editingUser.value = null;
+  selectedRoleIds.value = [];
+  keyword.value = "";
+  total.value = 0;
+  page.value = 1;
+  loading.value = false;
+  saving.value = false;
+  errorMessage.value = "";
+});
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 
@@ -42,25 +54,20 @@ function localizedRoleName(role: Role): string {
 }
 
 async function load(): Promise<void> {
-  const currentVersion = ++loadVersion;
-  loading.value = true;
-  errorMessage.value = "";
-  try {
-    const [userPage, roleList] = await Promise.all([
-      listUsers({ page: page.value, pageSize: PAGE_SIZE, search: keyword.value.trim() || undefined }),
-      listRoles(),
-    ]);
-    if (currentVersion !== loadVersion) return;
-    users.value = [...userPage.items];
-    roles.value = [...roleList];
-    total.value = userPage.total;
-    page.value = userPage.page;
-  } catch (error) {
-    if (currentVersion !== loadVersion) return;
-    errorMessage.value = accessErrorKey(error, "access.users.loadFailedFallback");
-  } finally {
-    if (currentVersion === loadVersion) loading.value = false;
-  }
+  await run("load", (signal) => Promise.all([
+    listUsers({ page: page.value, pageSize: PAGE_SIZE, search: keyword.value.trim() || undefined }, signal),
+    listRoles(signal),
+  ]), {
+    start: () => { loading.value = true; errorMessage.value = ""; },
+    success: ([userPage, roleList]) => {
+      users.value = [...userPage.items];
+      roles.value = [...roleList];
+      total.value = userPage.total;
+      page.value = userPage.page;
+    },
+    error: (error) => { errorMessage.value = accessErrorKey(error, "access.users.loadFailedFallback"); },
+    finish: () => { loading.value = false; },
+  });
 }
 
 function search(): void {
@@ -95,23 +102,23 @@ function toggleRole(roleId: number, event: Event): void {
 }
 
 async function saveAssignment(): Promise<void> {
-  if (!editingUser.value || !props.canWrite) return;
+  if (!editingUser.value || !props.canWrite || saving.value) return;
   if (selectedRoleIds.value.length === 0) {
     toast.warning(t("access.users.validation.minimumRole"));
     return;
   }
-  saving.value = true;
-  try {
-    await setUserRoles(editingUser.value.id, selectedRoleIds.value);
-    toast.success(t("access.users.success.updated"));
-    editingUser.value = null;
-    selectedRoleIds.value = [];
-    await load();
-  } catch (error) {
-    toast.error(t(accessErrorKey(error, "access.users.errors.assignmentFailed")));
-  } finally {
-    saving.value = false;
-  }
+  const id = editingUser.value.id;
+  await run("save", (signal) => setUserRoles(id, selectedRoleIds.value, signal), {
+    start: () => { saving.value = true; },
+    success: async () => {
+      toast.success(t("access.users.success.updated"));
+      editingUser.value = null;
+      selectedRoleIds.value = [];
+      await load();
+    },
+    error: (error) => toast.error(t(accessErrorKey(error, "access.users.errors.assignmentFailed"))),
+    finish: () => { saving.value = false; },
+  });
 }
 
 onMounted(() => void load());

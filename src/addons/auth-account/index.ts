@@ -58,6 +58,8 @@ const authAccount: PluginModule = {
     removeAuthGuard = router.beforeEach((to) => {
       const authenticated = Boolean(getAccessToken());
       if (to.meta.requiresAuth && !authenticated) {
+        // Embedded protected views wait for shell auth without dispatching.
+        if (window.parent !== window) return true;
         return { name: "login", query: { redirect: to.fullPath } };
       }
       if (to.meta.public && authenticated && to.name !== "register") {

@@ -12,10 +12,12 @@ import { toast } from "@/composables/useToast";
 import ApiKeyPanel from "@/addons/auth-account/components/ApiKeyPanel.vue";
 import { requestShellLogout } from "@/addons/auth-account/composables/useShellBridge";
 import { SESSION_CHANGE_EVENT } from "@/addons/auth-account/composables/sessionEvents";
+import { useSessionRequests } from "@/composables/useSessionRequests";
 
 const userStore = useUserStore();
 const { t } = useI18n();
 const loading = ref(false);
+const run = useSessionRequests(() => { loading.value = false; });
 
 const avatarLetter = computed(() => {
   const name = userStore.displayName || userStore.user?.username || "U";
@@ -23,14 +25,10 @@ const avatarLetter = computed(() => {
 });
 
 async function loadUser(): Promise<void> {
-  loading.value = true;
-  try {
-    await userStore.fetchUser();
-  } catch {
-    // 401 由 http 拦截器处理；其他失败不阻塞页面骨架。
-  } finally {
-    loading.value = false;
-  }
+  await run("identity", (signal) => userStore.fetchUser(signal), {
+    start: () => { loading.value = true; },
+    finish: () => { loading.value = false; },
+  });
 }
 
 async function handleLogout(): Promise<void> {
@@ -49,7 +47,6 @@ function onSessionChange(event: Event): void {
   const authenticated = (event as CustomEvent<{ authenticated?: unknown }>).detail
     ?.authenticated === true;
   if (authenticated) void loadUser();
-  else userStore.logout();
 }
 
 onMounted(() => {

@@ -14,6 +14,8 @@ import { createApiKey, deleteApiKey, listApiKeys } from "@/addons/auth-account/a
 import type { ApiKey, ApiKeyWithSecret } from "@/addons/auth-account/api/types";
 import { toast } from "@/composables/useToast";
 import { SESSION_CHANGE_EVENT } from "@/addons/auth-account/composables/sessionEvents";
+import { useSessionRequests } from "@/composables/useSessionRequests";
+import { getAccessToken } from "@/utils/token";
 
 const { t } = useI18n();
 
@@ -26,72 +28,72 @@ const createForm = ref({ name: "" });
 
 const plaintextDialogVisible = ref(false);
 const createdKey = ref<ApiKeyWithSecret | null>(null);
+const run = useSessionRequests(() => {
+  keys.value = [];
+  createdKey.value = null;
+  plaintextDialogVisible.value = false;
+  createDialogVisible.value = false;
+  createForm.value = { name: "" };
+  loading.value = false;
+  createLoading.value = false;
+});
 
 async function loadKeys(): Promise<void> {
-  loading.value = true;
-  try {
-    keys.value = await listApiKeys();
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : t("common.networkError"));
-  } finally {
-    loading.value = false;
-  }
+  await run("list", listApiKeys, {
+    start: () => { loading.value = true; },
+    success: (value) => { keys.value = value; },
+    error: (error) => toast.error(error instanceof Error ? error.message : t("common.networkError")),
+    finish: () => { loading.value = false; },
+  });
 }
 
 function openCreateDialog(): void {
+  if (!getAccessToken()) return;
   createForm.value = { name: "" };
   createDialogVisible.value = true;
 }
 
 async function handleCreate(): Promise<void> {
+  if (createLoading.value || !getAccessToken()) return;
   if (!createForm.value.name.trim()) {
     toast.warning(t("apiKey.createPlaceholder"));
     return;
   }
-  createLoading.value = true;
-  try {
-    const created = await createApiKey({ name: createForm.value.name.trim() });
-    createdKey.value = created;
-    createDialogVisible.value = false;
-    plaintextDialogVisible.value = true;
-    toast.success(t("apiKey.createSuccess"));
-    await loadKeys();
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : t("apiKey.createFailed"));
-  } finally {
-    createLoading.value = false;
-  }
+  await run("create", (signal) => createApiKey({ name: createForm.value.name.trim() }, signal), {
+    start: () => { createLoading.value = true; },
+    success: async (created) => {
+      createdKey.value = created;
+      createDialogVisible.value = false;
+      plaintextDialogVisible.value = true;
+      toast.success(t("apiKey.createSuccess"));
+      await loadKeys();
+    },
+    error: (error) => toast.error(error instanceof Error ? error.message : t("apiKey.createFailed")),
+    finish: () => { createLoading.value = false; },
+  });
 }
 
 async function handleDelete(key: ApiKey): Promise<void> {
   // EP 的 ElMessageBox.confirm 体验更好，但为移除 EP 改用原生 confirm。
   if (!window.confirm(t("apiKey.deleteConfirm"))) return;
-  try {
-    await deleteApiKey(key.id);
-    toast.success(t("apiKey.deleteSuccess"));
-    await loadKeys();
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : t("apiKey.deleteFailed"));
-  }
+  await run(`delete-${key.id}`, (signal) => deleteApiKey(key.id, signal), {
+    success: async () => { toast.success(t("apiKey.deleteSuccess")); await loadKeys(); },
+    error: (error) => toast.error(error instanceof Error ? error.message : t("apiKey.deleteFailed")),
+  });
 }
 
 async function copyPlaintext(): Promise<void> {
   if (!createdKey.value) return;
-  try {
-    await navigator.clipboard.writeText(createdKey.value.plaintext);
-    toast.success(t("common.copied"));
-  } catch {
-    toast.warning(t("common.copy"));
-  }
+  const plaintext = createdKey.value.plaintext;
+  await run("copy", () => navigator.clipboard.writeText(plaintext), {
+    success: () => toast.success(t("common.copied")),
+    error: () => toast.warning(t("common.copy")),
+  });
 }
 
 function onSessionChange(event: Event): void {
   const authenticated = (event as CustomEvent<{ authenticated?: unknown }>).detail
     ?.authenticated === true;
-  createdKey.value = null;
-  plaintextDialogVisible.value = false;
-  createDialogVisible.value = false;
-  keys.value = [];
   if (authenticated) void loadKeys();
 }
 

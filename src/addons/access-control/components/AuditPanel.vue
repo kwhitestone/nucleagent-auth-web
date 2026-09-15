@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { listAuditLogs, type AuditLog } from "@/addons/access-control/api/rbac";
 import { accessErrorKey, auditActionKey } from "@/addons/access-control/composables/accessI18n";
+import { useSessionRequests } from "@/composables/useSessionRequests";
 
 const PAGE_SIZE = 30;
 const { locale, t } = useI18n();
@@ -12,7 +13,13 @@ const page = ref(1);
 const total = ref(0);
 const loading = ref(true);
 const errorMessage = ref("");
-let loadVersion = 0;
+const run = useSessionRequests(() => {
+  logs.value = [];
+  page.value = 1;
+  total.value = 0;
+  loading.value = false;
+  errorMessage.value = "";
+});
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 
@@ -37,21 +44,16 @@ function formatDetail(value: unknown): string {
 }
 
 async function load(): Promise<void> {
-  const currentVersion = ++loadVersion;
-  loading.value = true;
-  errorMessage.value = "";
-  try {
-    const result = await listAuditLogs({ page: page.value, pageSize: PAGE_SIZE });
-    if (currentVersion !== loadVersion) return;
-    logs.value = [...result.items];
-    total.value = result.total;
-    page.value = result.page;
-  } catch (error) {
-    if (currentVersion !== loadVersion) return;
-    errorMessage.value = accessErrorKey(error, "access.audit.loadFailedFallback");
-  } finally {
-    if (currentVersion === loadVersion) loading.value = false;
-  }
+  await run("load", (signal) => listAuditLogs({ page: page.value, pageSize: PAGE_SIZE }, signal), {
+    start: () => { loading.value = true; errorMessage.value = ""; },
+    success: (result) => {
+      logs.value = [...result.items];
+      total.value = result.total;
+      page.value = result.page;
+    },
+    error: (error) => { errorMessage.value = accessErrorKey(error, "access.audit.loadFailedFallback"); },
+    finish: () => { loading.value = false; },
+  });
 }
 
 function changePage(nextPage: number): void {

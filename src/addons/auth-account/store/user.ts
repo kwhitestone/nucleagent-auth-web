@@ -1,26 +1,36 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, onScopeDispose, ref, shallowRef } from "vue";
 import { fetchUserInfo } from "@/addons/auth-account/api/auth";
 import type { UserInfo } from "@/addons/auth-account/api/types";
 import { hasPermission } from "@/addons/auth-account/composables/permissionPolicy";
 import {
-  clearLegacyRefreshToken,
+  acceptShellSession,
+  captureSession,
+  clearPersistedCredentials,
   clearTokens,
-  getAccessToken,
+  isCurrentSession,
+  SessionCancelledError,
+  subscribeSession,
 } from "@/utils/token";
 
 /**
  * User store.
  *
  * State is mutated only through actions (immutable-style: every action
- * reassigns the refs rather than mutating nested fields). The access token is
- * persisted to localStorage via the token utils so it survives reloads; the
- * `token` ref is hydrated from localStorage on store creation.
+ * reassigns the refs rather than mutating nested fields). Only the validated
+ * shell session supplies an in-memory access token.
  */
 export const useUserStore = defineStore("user", () => {
-  clearLegacyRefreshToken();
-  const token = ref<string>(getAccessToken());
+  clearPersistedCredentials();
+  const session = shallowRef(captureSession());
+  const token = computed(() => session.value.token);
   const user = ref<UserInfo | null>(null);
+  let userRequest = 0;
+  onScopeDispose(subscribeSession(() => {
+    session.value = captureSession();
+    user.value = null;
+    userRequest += 1;
+  }));
 
   const isAuthenticated = computed(() => !!token.value);
   const displayName = computed(
@@ -35,26 +45,22 @@ export const useUserStore = defineStore("user", () => {
     return hasPermission(permissions.value, required);
   }
 
-  function acceptShellToken(accessToken: string): void {
-    if (token.value !== accessToken) user.value = null;
-    localStorage.setItem("nucleagent_access_token", accessToken);
-    localStorage.removeItem("nucleagent_refresh_token");
-    token.value = accessToken;
+  function acceptShellToken(accessToken: string, version: number): void {
+    acceptShellSession(accessToken, version);
   }
 
-  async function fetchUser(): Promise<UserInfo> {
-    const requestToken = token.value;
-    const info = await fetchUserInfo();
-    if (token.value !== requestToken) {
-      throw new Error("Session changed while user information was loading");
+  async function fetchUser(signal?: AbortSignal): Promise<UserInfo> {
+    const owner = captureSession();
+    const request = ++userRequest;
+    const info = await fetchUserInfo(signal);
+    if (!isCurrentSession(owner) || signal?.aborted || request !== userRequest) {
+      throw new SessionCancelledError();
     }
     user.value = info;
     return info;
   }
 
   function logout(): void {
-    user.value = null;
-    token.value = "";
     clearTokens();
   }
 

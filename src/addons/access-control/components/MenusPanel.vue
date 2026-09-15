@@ -19,6 +19,7 @@ import {
 } from "@/addons/access-control/composables/authorizationPolicy";
 import { accessCatalogKey, accessErrorKey } from "@/addons/access-control/composables/accessI18n";
 import { toast } from "@/composables/useToast";
+import { useSessionRequests } from "@/composables/useSessionRequests";
 
 const props = defineProps<{ canWrite: boolean }>();
 const { t, te } = useI18n();
@@ -46,6 +47,17 @@ const dialogOpen = ref(false);
 const editingMenu = ref<Menu | null>(null);
 const menuForm = ref<MenuInput>(emptyMenuForm());
 const selectedPermissionCodes = ref<string[]>([]);
+const run = useSessionRequests(() => {
+  menus.value = [];
+  permissions.value = [];
+  loading.value = false;
+  saving.value = false;
+  errorMessage.value = "";
+  dialogOpen.value = false;
+  editingMenu.value = null;
+  menuForm.value = emptyMenuForm();
+  selectedPermissionCodes.value = [];
+});
 
 const menuApps = ["shell", "auth", "core", "executor", "deliverables"] as const;
 
@@ -73,17 +85,15 @@ function localizedPermissionName(permission: Permission): string {
 }
 
 async function load(): Promise<void> {
-  loading.value = true;
-  errorMessage.value = "";
-  try {
-    const [menuList, permissionList] = await Promise.all([listMenus(), listPermissions()]);
-    menus.value = [...menuList];
-    permissions.value = [...permissionList].sort((left, right) => left.code.localeCompare(right.code));
-  } catch (error) {
-    errorMessage.value = accessErrorKey(error, "access.menus.loadFailedFallback");
-  } finally {
-    loading.value = false;
-  }
+  await run("load", (signal) => Promise.all([listMenus(signal), listPermissions(signal)]), {
+    start: () => { loading.value = true; errorMessage.value = ""; },
+    success: ([menuList, permissionList]) => {
+      menus.value = [...menuList];
+      permissions.value = [...permissionList].sort((left, right) => left.code.localeCompare(right.code));
+    },
+    error: (error) => { errorMessage.value = accessErrorKey(error, "access.menus.loadFailedFallback"); },
+    finish: () => { loading.value = false; },
+  });
 }
 
 function openCreate(): void {
@@ -115,7 +125,7 @@ function openEdit(menu: Menu): void {
 }
 
 async function saveMenu(): Promise<void> {
-  if (!props.canWrite) return;
+  if (!props.canWrite || saving.value) return;
   const payload: MenuInput = {
     ...menuForm.value,
     parentId: Number(menuForm.value.parentId) || 0,
@@ -144,29 +154,26 @@ async function saveMenu(): Promise<void> {
     toast.warning(t("access.menus.validation.invalidPath"));
     return;
   }
-  saving.value = true;
-  try {
-    if (editingMenu.value) await updateMenu(editingMenu.value.id, payload);
-    else await createMenu(payload);
-    dialogOpen.value = false;
-    toast.success(t(editingMenu.value ? "access.menus.success.updated" : "access.menus.success.created"));
-    await load();
-  } catch (error) {
-    toast.error(t(accessErrorKey(error, "access.menus.errors.saveFailed")));
-  } finally {
-    saving.value = false;
-  }
+  const editing = editingMenu.value;
+  await run("save", (signal) => editing
+    ? updateMenu(editing.id, payload, signal) : createMenu(payload, signal), {
+    start: () => { saving.value = true; },
+    success: async () => {
+      dialogOpen.value = false;
+      toast.success(t(editing ? "access.menus.success.updated" : "access.menus.success.created"));
+      await load();
+    },
+    error: (error) => toast.error(t(accessErrorKey(error, "access.menus.errors.saveFailed"))),
+    finish: () => { saving.value = false; },
+  });
 }
 
 async function removeMenu(menu: Menu): Promise<void> {
   if (!props.canWrite || !window.confirm(t("access.menus.dialog.deleteConfirm", { title: localizedMenuTitle(menu) }))) return;
-  try {
-    await deleteMenu(menu.id);
-    toast.success(t("access.menus.success.deleted"));
-    await load();
-  } catch (error) {
-    toast.error(t(accessErrorKey(error, "access.menus.errors.deleteFailed")));
-  }
+  await run(`delete-${menu.id}`, (signal) => deleteMenu(menu.id, signal), {
+    success: async () => { toast.success(t("access.menus.success.deleted")); await load(); },
+    error: (error) => toast.error(t(accessErrorKey(error, "access.menus.errors.deleteFailed"))),
+  });
 }
 
 onMounted(() => void load());

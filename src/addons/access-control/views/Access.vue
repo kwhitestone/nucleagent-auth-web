@@ -11,6 +11,7 @@ import RolesPermissionsPanel from "@/addons/access-control/components/RolesPermi
 import MenusPanel from "@/addons/access-control/components/MenusPanel.vue";
 import AuditPanel from "@/addons/access-control/components/AuditPanel.vue";
 import { accessCatalogKey, accessErrorKey } from "@/addons/access-control/composables/accessI18n";
+import { useSessionRequests } from "@/composables/useSessionRequests";
 
 type AccessTab = "users" | "roles" | "menus" | "audit";
 
@@ -21,7 +22,11 @@ const activeTab = ref<AccessTab>("users");
 const identityLoading = ref(true);
 const identityError = ref("");
 const contentVersion = ref(0);
-let identityRequestVersion = 0;
+const run = useSessionRequests(() => {
+  identityLoading.value = false;
+  identityError.value = "";
+  contentVersion.value += 1;
+});
 
 const tabs = computed<Array<{ key: AccessTab; label: string; description: string; required: string[] }>>(() => [
   { key: "users", label: t("access.tabs.users.label"), description: t("access.tabs.users.description"), required: ["auth:user:read", "auth:role:read"] },
@@ -43,33 +48,23 @@ const localizedRoles = computed(() => userStore.roles.map((role) => {
 }));
 
 async function refreshIdentity(): Promise<void> {
-  const currentVersion = ++identityRequestVersion;
-  identityLoading.value = true;
-  identityError.value = "";
-  try {
-    await userStore.fetchUser();
-    if (currentVersion !== identityRequestVersion) return;
-    if (!accessibleTabs.value.some((tab) => tab.key === activeTab.value)) {
-      activeTab.value = accessibleTabs.value[0]?.key ?? "users";
-    }
-    contentVersion.value += 1;
-  } catch (error) {
-    if (currentVersion !== identityRequestVersion) return;
-    identityError.value = accessErrorKey(error, "access.page.identityLoadFailedFallback");
-  } finally {
-    if (currentVersion === identityRequestVersion) identityLoading.value = false;
-  }
+  await run("identity", (signal) => userStore.fetchUser(signal), {
+    start: () => { identityLoading.value = true; identityError.value = ""; },
+    success: () => {
+      if (!accessibleTabs.value.some((tab) => tab.key === activeTab.value)) {
+        activeTab.value = accessibleTabs.value[0]?.key ?? "users";
+      }
+      contentVersion.value += 1;
+    },
+    error: (error) => { identityError.value = accessErrorKey(error, "access.page.identityLoadFailedFallback"); },
+    finish: () => { identityLoading.value = false; },
+  });
 }
 
 function onSessionChange(event: Event): void {
   const authenticated = (event as CustomEvent<{ authenticated?: unknown }>).detail
     ?.authenticated === true;
   if (authenticated) void refreshIdentity();
-  else {
-    identityRequestVersion += 1;
-    userStore.logout();
-    identityLoading.value = false;
-  }
 }
 
 onMounted(() => {
