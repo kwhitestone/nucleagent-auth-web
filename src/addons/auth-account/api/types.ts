@@ -19,14 +19,6 @@ export interface AuthUser {
   roles?: string[];
 }
 
-/** Login / refresh-token success payload. */
-export interface TokenData {
-  accessToken: string;
-  refreshToken?: string;
-  expiresIn: string;
-  user: AuthUser;
-}
-
 /** User-info success payload (extends AuthUser with roles). */
 export interface UserInfo extends AuthUser {
   roles: string[];
@@ -46,37 +38,3 @@ export interface UserInfo extends AuthUser {
   }>;
 }
 
-/** API key as returned by the create endpoint (plaintext shown once). */
-export interface ApiKeyWithSecret {
-  id: number | string;
-  name: string;
-  prefix: string;
-  plaintext: string;
-  enable: boolean;
-  createdAt: string;
-}
-
-/** API key as returned by the list endpoint (no plaintext). */
-export interface ApiKey {
-  id: number | string;
-  name: string;
-  prefix: string;
-  enable: boolean;
-  lastUsed: string;
-  createdAt: string;
-}
-
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
-
-export interface RegisterRequest {
-  username: string;
-  password: string;
-  nickName: string;
-}
-
-export interface CreateApiKeyRequest {
-  name: string;
-}

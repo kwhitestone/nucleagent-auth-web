@@ -18,8 +18,14 @@ test("auth web is composed from scoped V2 addons", () => {
   assert.doesNotMatch(router, /views\/(Login|Register|Home|Access)/);
   assert.doesNotMatch(router, /beforeEach/);
   assert.match(account, /apiVersion:\s*["']prism-fusion\/v2["']/);
-  assert.match(account, /router\.beforeEach/);
-  assert.match(account, /routeScopes:\s*\[[^\]]*["']\/login["']/s);
+  // Sign-in and the personal account page are the shell's (UNI L4 + A-12 ext.):
+  // auth-account owns no routes and auth-web has no login/register/home/logout.
+  assert.match(account, /routeScopes:\s*\[\]/);
+  assert.doesNotMatch(account, /routes:|views\//);
+  assert.doesNotMatch(shellBridge, /["']logout-request["']/);
+  for (const gone of ["views/Login.vue", "views/Register.vue", "views/Home.vue", "components/ApiKeyPanel.vue"]) {
+    assert.equal(existsSync(new URL(`../src/addons/auth-account/${gone}`, import.meta.url)), false, gone);
+  }
   assert.match(access, /requires:\s*\[[^\]]*auth-account/s);
   assert.match(access, /routeScopes:\s*\[[^\]]*["']\/access["']/s);
   assert.match(shellBridge, /createRemoteChildChannel/);

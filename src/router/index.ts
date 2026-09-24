@@ -15,11 +15,11 @@ const isEmbedded =
   (typeof window !== "undefined" && window.parent !== window);
 
 export const coreRoutes: RouteRecordRaw[] = [
-  { path: "/", name: "auth-root", redirect: "/home" },
+  { path: "/", name: "auth-root", redirect: "/access" },
   {
     path: "/:pathMatch(.*)*",
     name: "auth-fallback",
-    redirect: "/home",
+    redirect: "/access",
   },
 ];
 

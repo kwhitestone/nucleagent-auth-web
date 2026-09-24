@@ -40,7 +40,7 @@ export function installShellBridge(router: Router): () => void {
     parent: window.parent,
     messages: {
       toChild: ["auth", "view", "locale"],
-      fromChild: ["auth-required", "login-request", "logout-request", "authorization-changed"],
+      fromChild: ["auth-required", "login-request", "authorization-changed"],
     },
     onConnected() {
       currentSessionVersion = 0;
@@ -103,18 +103,4 @@ export function installShellBridge(router: Router): () => void {
       resetSession();
     }
   };
-}
-
-export function requestShellLogout(): boolean {
-  return activeChannel?.send("logout-request", {
-    source: "sub",
-    type: "logout-request",
-  }) ?? false;
-}
-
-export function requestShellLogin(): boolean {
-  return activeChannel?.send("login-request", {
-    source: "sub",
-    type: "login-request",
-  }) ?? false;
 }

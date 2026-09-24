@@ -2,15 +2,18 @@ import type { PluginModule } from "@prism-fusion/plugin-runtime";
 
 import { registerAuthRuntime } from "@/contracts/auth-runtime";
 import router from "@/router";
-import { getAccessToken } from "@/utils/token";
 import { authRuntime } from "./runtime";
 import { mustDelegateAuthMutationsToShell } from "./composables/authAuthorityPolicy";
 import { installShellBridge } from "./composables/useShellBridge";
 
 let removeShellBridge: (() => void) | undefined;
-let removeAuthGuard: (() => void) | undefined;
 let unregisterRuntime: (() => void) | undefined;
 
+/**
+ * Sign-in and the personal account page are the shell's (/login, /account;
+ * UNI L4 + A-12 ext.). A standalone visit goes there; framed, this app only
+ * serves the /access admin console and the shell guards it before framing.
+ */
 export function redirectDelegatedAuthToShell(isMicroApp: boolean): boolean {
   const isEmbedded = isMicroApp || window.parent !== window;
   if (!mustDelegateAuthMutationsToShell(isEmbedded)) return false;
@@ -22,58 +25,25 @@ export function redirectDelegatedAuthToShell(isMicroApp: boolean): boolean {
   return true;
 }
 
+/** Session plumbing only: auth runtime + shell bridge. It owns no routes. */
 const authAccount: PluginModule = {
   name: "auth-account",
-  description: "Authentication, account and API-key user experience",
+  description: "Shell session bridge and auth runtime for the access console",
   manifest: {
     apiVersion: "prism-fusion/v2",
     kind: "frontend-addon",
     id: "auth-account",
     version: "0.1.0",
     requires: [],
-    routeScopes: ["/login", "/register", "/home"],
+    routeScopes: [],
   },
-  routes: [
-    {
-      path: "/login",
-      name: "login",
-      component: () => import("./views/Login.vue"),
-      meta: { public: true },
-    },
-    {
-      path: "/register",
-      name: "register",
-      component: () => import("./views/Register.vue"),
-      meta: { public: true },
-    },
-    {
-      path: "/home",
-      name: "home",
-      component: () => import("./views/Home.vue"),
-      meta: { requiresAuth: true },
-    },
-  ],
   setup() {
     unregisterRuntime = registerAuthRuntime(authRuntime);
-    removeAuthGuard = router.beforeEach((to) => {
-      const authenticated = Boolean(getAccessToken());
-      if (to.meta.requiresAuth && !authenticated) {
-        // Embedded protected views wait for shell auth without dispatching.
-        if (window.parent !== window) return true;
-        return { name: "login", query: { redirect: to.fullPath } };
-      }
-      if (to.meta.public && authenticated && to.name !== "register") {
-        return { name: "home" };
-      }
-      return true;
-    });
     removeShellBridge = installShellBridge(router);
   },
   destroy() {
     removeShellBridge?.();
     removeShellBridge = undefined;
-    removeAuthGuard?.();
-    removeAuthGuard = undefined;
     unregisterRuntime?.();
     unregisterRuntime = undefined;
   },

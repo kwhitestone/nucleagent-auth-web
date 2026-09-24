@@ -26,12 +26,10 @@ const api = await import("../src/addons/auth-account/api/auth.ts");
 const rbac = await import("../src/addons/access-control/api/rbac.ts");
 const { authRuntime } = await import("../src/addons/auth-account/runtime.ts");
 const { registerAuthRuntime } = await import("../src/contracts/auth-runtime.ts");
-const { installShellBridge, requestShellLogin, requestShellLogout } = await import("../src/addons/auth-account/composables/useShellBridge.ts");
+const { installShellBridge } = await import("../src/addons/auth-account/composables/useShellBridge.ts");
 const session = await import("../src/utils/token.ts");
 const { useSessionRequests } = await import("../src/composables/useSessionRequests.ts");
 const { toast } = await import("../src/composables/useToast.ts");
-const { default: ApiKeyPanel } = await import("../src/addons/auth-account/components/ApiKeyPanel.vue");
-const { default: Home } = await import("../src/addons/auth-account/views/Home.vue");
 const { default: Access } = await import("../src/addons/access-control/views/Access.vue");
 const { routerKey } = await import("vue-router");
 const panels = await Promise.all([
@@ -53,7 +51,7 @@ let disposeBridge: () => void;
 let unregister: () => void;
 const cleanups: Array<() => void> = [];
 let pending: Array<{ config: any; resolve: (value: any) => void; reject: (error: any) => void }>;
-const router = { currentRoute: { value: { path: "/home" } }, replace() {}, push() {} };
+const router = { currentRoute: { value: { path: "/access" } }, replace() {}, push() {} };
 const instanceId = "test-instance-00000001";
 let versionBase = 0;
 function message(type: string, payload?: unknown, overrides = {}) {
@@ -104,19 +102,19 @@ afterEach(() => {
 test("persisted credentials never authenticate or dispatch protected consumers before shell auth", async () => {
   assert.equal(store.token, "");
   const results = await Promise.allSettled([
-    store.fetchUser(), api.listApiKeys(), rbac.listRoles(),
+    store.fetchUser(), api.fetchUserInfo(), rbac.listRoles(),
   ]);
   assert.equal(pending.length, 0);
   assert.ok(results.every((result) => result.status === "rejected"));
 });
 
-test("Home, API keys and Access mounts wait for trusted authentication", async () => {
-  mount(Home); mount(ApiKeyPanel); mount(Access);
+test("Access mount waits for trusted authentication", async () => {
+  mount(Access);
   await flush();
   assert.equal(pending.length, 0);
   auth("session-a-fixture", 1);
   await flush();
-  assert.ok(pending.length >= 2);
+  assert.ok(pending.length >= 1);
   assert.ok(pending.every(({ config }) => config.headers.Authorization === "Bearer session-a-fixture"));
   assert.equal(storage.get("nucleagent_access_token"), undefined);
 });
@@ -132,29 +130,6 @@ test("same-token version transition aborts a user-info request and rejects ABA c
   resolveRequest(old, { username: "old", roles: ["admin"], permissions: ["*"], menus: [] });
   await outcome;
   assert.equal(store.user, null);
-});
-
-test("late create completion cannot reopen plaintext or trigger follow-up after account switch", async () => {
-  auth("session-a-fixture", 1);
-  const { state } = mount(ApiKeyPanel);
-  await flush();
-  resolveRequest(pending[0], []);
-  await flush();
-  state.createForm = { name: "offline-fixture" };
-  const done = state.handleCreate();
-  await flush();
-  const create = pending.find(({ config }) => config.method === "post")!;
-  auth("session-b-fixture", 2);
-  await flush();
-  const count = pending.length;
-  resolveRequest(create, { plaintext: "unit-test-secret-not-a-credential" });
-  await flush();
-  assert.equal(state.createdKey, null);
-  assert.equal(state.plaintextDialogVisible, false);
-  assert.equal(create.config.signal?.aborted, true);
-  assert.equal(pending.length, count);
-  assert.deepEqual(notices, []);
-  await done;
 });
 
 for (const [i, name] of ["users", "roles", "menus", "audit"].entries()) {
@@ -183,7 +158,7 @@ test("untrusted origin and old versions cannot change the active session", async
 
 test("bridge disposal clears session and cancels outstanding requests", async () => {
   auth("session-a-fixture", 1);
-  const outcome = assert.rejects(api.listApiKeys());
+  const outcome = assert.rejects(api.fetchUserInfo());
   await flush();
   disposeBridge();
   assert.equal(store.token, "");
@@ -227,7 +202,7 @@ test("current user data populates permissions without persistence; logout clears
 
 test("request captures token synchronously and never dispatches with a replacement identity", async () => {
   auth("session-a-fixture", 1);
-  const result = assert.rejects(api.listApiKeys());
+  const result = assert.rejects(api.fetchUserInfo());
   auth("session-b-fixture", 2);
   await flush();
   for (const request of pending) {
@@ -244,7 +219,7 @@ test("current 401 clears identity and reports the exact memory session version",
   parent.postMessage = (envelope: any) => { sent.push(envelope); };
   try {
     auth("session-a-fixture", 1);
-    const result = assert.rejects(api.listApiKeys(), { status: 401 });
+    const result = assert.rejects(api.fetchUserInfo(), { status: 401 });
     await flush();
     rejectHTTP(pending[0], 401, { message: "Rejected" });
     await result;
@@ -258,7 +233,7 @@ test("current 401 clears identity and reports the exact memory session version",
 
 test("old 401 after A-B-A cannot log out the new same-token session", async () => {
   auth("session-a-fixture", 1);
-  const result = assert.rejects(api.listApiKeys());
+  const result = assert.rejects(api.fetchUserInfo());
   await flush();
   auth("session-b-fixture", 2);
   auth("session-a-fixture", 3);
@@ -270,7 +245,7 @@ test("old 401 after A-B-A cannot log out the new same-token session", async () =
 test("caller cancellation aborts transport without invalidating the current session", async () => {
   auth("session-a-fixture", 1);
   const owner = new AbortController();
-  const result = assert.rejects(api.listApiKeys(owner.signal));
+  const result = assert.rejects(api.fetchUserInfo(owner.signal));
   await flush();
   owner.abort();
   assert.equal(pending[0].config.signal.aborted, true);
@@ -344,20 +319,14 @@ test("storage denial cannot prevent memory-only authentication or logout", async
   } finally { Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: previous }); }
 });
 
-test("channel still delegates login/logout and accepts locale/view messages", async () => {
-  assert.equal(requestShellLogin(), true);
-  assert.equal(requestShellLogout(), true);
+test("channel accepts locale/view messages", async () => {
   message("locale", { source: "shell", type: "locale", locale: "en" });
   assert.equal(document.documentElement.lang, "en");
   message("view", { source: "shell", type: "view", path: "/access" });
-  disposeBridge();
-  assert.equal(requestShellLogin(), false);
-  assert.equal(requestShellLogout(), false);
 });
 
 const protectedCalls = [
-  () => api.fetchUserInfo(), () => api.listApiKeys(),
-  () => api.createApiKey({ name: "offline-fixture" }), () => api.deleteApiKey(1),
+  () => api.fetchUserInfo(),
   () => rbac.listRoles(), () => rbac.listPermissions(), () => rbac.listRolePermissions(1),
   () => rbac.listMenus(), () => rbac.listUsers({ page: 1, pageSize: 20 }),
   () => rbac.listAuditLogs({ page: 1, pageSize: 30 }),
@@ -415,7 +384,8 @@ test("RBAC mutation that settles across a session transition emits no authorizat
 
 test("public registration remains anonymous and its 401 cannot clear a trusted session", async () => {
   auth("session-a-fixture", 1);
-  const done = assert.rejects(api.register({ username: "offline", password: "offline-fixture", nickName: "Offline" }));
+  const done = assert.rejects(http.post("/api/v1/addons/auth/register",
+    { username: "offline", password: "offline-fixture", nickName: "Offline" }));
   await flush();
   assert.equal(pending[0].config.headers.Authorization, undefined);
   rejectHTTP(pending[0], 401);
@@ -426,12 +396,12 @@ test("public registration remains anonymous and its 401 cannot clear a trusted s
 test("current HTTP errors and non-envelope responses preserve their contracts", async () => {
   auth("session-a-fixture", 1);
   for (const data of [{ detail: "Unavailable" }, { title: "Unavailable" }, {}, undefined]) {
-    const done = assert.rejects(api.listApiKeys(), { status: 503 });
+    const done = assert.rejects(api.fetchUserInfo(), { status: 503 });
     await flush();
     rejectHTTP(pending.at(-1)!, 503, data);
     await done;
   }
-  const business = assert.rejects(api.listApiKeys(), { code: 4, status: 200 });
+  const business = assert.rejects(api.fetchUserInfo(), { code: 4, status: 200 });
   await flush();
   const request = pending.at(-1)!;
   request.resolve({ data: { code: 4 }, status: 200, headers: {}, config: request.config });
@@ -602,47 +572,18 @@ for (const action of ["assignment", "role", "permissions", "menu"]) {
   });
 }
 
-test("current API key create/delete still displays plaintext once and reloads only current data", async () => {
-  auth("session-a-fixture", 1);
-  const { state } = mount(ApiKeyPanel);
-  await flush();
-  resolveRequest(pending[0], []);
-  await flush();
-  state.openCreateDialog();
-  state.createForm = { name: "Offline" };
-  const done = state.handleCreate();
-  await flush();
-  resolveRequest(pending.at(-1)!, { id: 1, plaintext: "unit-test-only" });
-  await flush();
-  assert.equal(state.plaintextDialogVisible, true);
-  assert.equal(state.createdKey.plaintext, "unit-test-only");
-  resolveRequest(pending.at(-1)!, [{ id: 1 }]);
-  await done;
-  const deleted = state.handleDelete({ id: 1 });
-  await flush();
-  assert.equal(pending.at(-1)!.config.method, "delete");
-  resolveRequest(pending.at(-1)!, {});
-  await flush();
-  resolveRequest(pending.at(-1)!, []);
-  await deleted;
-  assert.deepEqual(state.keys, []);
-  auth(null, 2);
-  assert.equal(state.createdKey, null);
-  assert.equal(state.plaintextDialogVisible, false);
-});
-
 test("current API failures reach mounted UI but obsolete failures do not", async () => {
   auth("session-a-fixture", 1);
-  const { state } = mount(ApiKeyPanel);
+  const { state } = mount(panels[3].default);
   await flush();
   rejectHTTP(pending[0], 503, { message: "Current failure" });
   await flush();
-  assert.deepEqual(notices, ["Current failure"]);
-  notices.length = 0;
-  const done = state.loadKeys();
+  assert.notEqual(state.errorMessage, "");
+  const done = state.load();
   await flush();
   auth(null, 2);
   rejectHTTP(pending.at(-1)!, 503, { message: "Old failure" });
   await done;
+  assert.equal(state.errorMessage, "");
   assert.deepEqual(notices, []);
 });

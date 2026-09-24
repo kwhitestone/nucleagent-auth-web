@@ -28,7 +28,7 @@ async function mount(): Promise<void> {
     app: nextApp,
     router,
     coreRoutes,
-    homePath: "/home",
+    homePath: "/access",
   });
   nextHost.register([authAccount, accessControl]);
   await nextHost.install();
