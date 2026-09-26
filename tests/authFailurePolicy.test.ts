@@ -5,7 +5,8 @@ import { shouldHandleUnauthorized } from "../src/addons/auth-account/api/authFai
 
 test("does not let a stale or pre-auth 401 clear a fresh iframe token", () => {
   assert.equal(shouldHandleUnauthorized("fresh", undefined), false);
-  assert.equal(shouldHandleUnauthorized("fresh", "Bearer old"), false);
-  assert.equal(shouldHandleUnauthorized("fresh", "Bearer fresh"), true);
+  assert.equal(shouldHandleUnauthorized("fresh", "old"), false);
+  assert.equal(shouldHandleUnauthorized("fresh", "fresh"), true);
   assert.equal(shouldHandleUnauthorized("", undefined), true);
+  assert.equal(shouldHandleUnauthorized("fresh", "Bearer fresh"), false, "A-16: header is the bare token");
 });

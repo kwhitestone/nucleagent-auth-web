@@ -64,7 +64,7 @@ http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
     config.signal = config.signal
       ? AbortSignal.any([owner.signal, config.signal as AbortSignal])
       : owner.signal;
-    config.headers.set("Authorization", `Bearer ${owner.token}`);
+    config.headers.set("Authorization", owner.token);
   } else {
     config.headers.delete("Authorization");
   }

@@ -5,7 +5,7 @@ const BASE = "/api/v1/addons/auth";
 
 /**
  * GET /user-info
- * Requires Authorization: Bearer <token>.
+ * Requires Authorization: <token> (bare, see A-16).
  * Registration and personal API keys moved to the shell's /account (UNI A-12 ext.).
  */
 export async function fetchUserInfo(signal?: AbortSignal): Promise<UserInfo> {

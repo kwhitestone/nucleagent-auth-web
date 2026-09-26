@@ -115,7 +115,7 @@ test("Access mount waits for trusted authentication", async () => {
   auth("session-a-fixture", 1);
   await flush();
   assert.ok(pending.length >= 1);
-  assert.ok(pending.every(({ config }) => config.headers.Authorization === "Bearer session-a-fixture"));
+  assert.ok(pending.every(({ config }) => config.headers.Authorization === "session-a-fixture"));
   assert.equal(storage.get("nucleagent_access_token"), undefined);
 });
 
@@ -206,7 +206,7 @@ test("request captures token synchronously and never dispatches with a replaceme
   auth("session-b-fixture", 2);
   await flush();
   for (const request of pending) {
-    assert.equal(request.config.headers.Authorization, "Bearer session-a-fixture");
+    assert.equal(request.config.headers.Authorization, "session-a-fixture");
     assert.equal(request.config.signal.aborted, true);
     resolveRequest(request, []);
   }
@@ -356,7 +356,7 @@ test("every current protected API retains methods/envelopes and authorization no
     await flush();
     assert.equal(pending.length, protectedCalls.length);
     for (const request of pending) {
-      assert.equal(request.config.headers.Authorization, "Bearer session-a-fixture");
+      assert.equal(request.config.headers.Authorization, "session-a-fixture");
       assert.equal(request.config.withCredentials, true);
       assert.equal(request.config.headers["X-Refresh-Cookie-Only"], "1");
       assert.ok(request.config.headers["X-Request-ID"]);
