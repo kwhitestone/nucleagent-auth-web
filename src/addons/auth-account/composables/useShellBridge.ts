@@ -18,9 +18,10 @@ import type { Router } from "vue-router";
 import { setLocale } from "@/i18n";
 import { AUTHORIZATION_CHANGED_EVENT } from "./authorizationEvents";
 import { setAuthRequiredNotifier } from "./authRequiredNotifier";
+import { outerAware } from "@/outerHost";
 
 const SHELL_ORIGIN = new URL(
-  import.meta.env.VITE_SHELL_URL ?? "http://localhost:26600",
+  outerAware(import.meta.env.VITE_SHELL_URL ?? "http://localhost:26600"),
 ).origin;
 let activeChannel: ReturnType<typeof createRemoteChildChannel> | undefined;
 

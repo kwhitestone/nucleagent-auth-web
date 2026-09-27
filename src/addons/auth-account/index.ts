@@ -5,6 +5,7 @@ import router from "@/router";
 import { authRuntime } from "./runtime";
 import { mustDelegateAuthMutationsToShell } from "./composables/authAuthorityPolicy";
 import { installShellBridge } from "./composables/useShellBridge";
+import { outerAware } from "@/outerHost";
 
 let removeShellBridge: (() => void) | undefined;
 let unregisterRuntime: (() => void) | undefined;
@@ -19,7 +20,7 @@ export function redirectDelegatedAuthToShell(isMicroApp: boolean): boolean {
   if (!mustDelegateAuthMutationsToShell(isEmbedded)) return false;
   const shellURL = new URL(
     "/account",
-    import.meta.env.VITE_SHELL_URL ?? "http://localhost:26600",
+    outerAware(import.meta.env.VITE_SHELL_URL ?? "http://localhost:26600"),
   );
   window.location.replace(shellURL.toString());
   return true;
