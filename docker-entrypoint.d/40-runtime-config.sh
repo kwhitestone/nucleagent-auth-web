@@ -29,5 +29,5 @@ export AUTH_UPSTREAM SHELL_ORIGIN
 # Substitute only our own placeholders — nginx's own $uri, $proxy_host and
 # $http_authorization must survive into the generated config untouched.
 envsubst '${AUTH_UPSTREAM} ${SHELL_ORIGIN}' \
-    < /etc/nginx/templates/nginx.conf.template \
+    < /etc/nginx/runtime.conf.template \
     > /etc/nginx/conf.d/default.conf
