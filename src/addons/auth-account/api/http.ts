@@ -5,6 +5,7 @@ import type { SessionSnapshot } from "@/utils/token";
 import type { ApiEnvelope } from "./types";
 import { createRequestId } from "./requestIdPolicy";
 import { notifyAuthRequired } from "@/addons/auth-account/composables/authRequiredNotifier";
+import { outerAware } from "@/outerHost";
 
 /**
  * Shared axios instance.
@@ -93,7 +94,7 @@ function redirectToLogin(reason: "missing" | "rejected"): void {
   if (typeof window !== "undefined") {
     window.location.replace(new URL(
       "/account",
-      import.meta.env.VITE_SHELL_URL ?? "http://localhost:26600",
+      outerAware(import.meta.env.VITE_SHELL_URL ?? "http://localhost:26600"),
     ).toString());
   }
 }
